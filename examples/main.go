@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/edgarsilva/simpleenv/v1"
+	"github.com/edgarsilva/simpleenv"
 	"github.com/joho/godotenv"
 )
 

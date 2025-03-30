@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/edgarsilva/simpleenv"
+	"github.com/edgarsilva/simpleenv/v1"
 	"github.com/joho/godotenv"
 )
 
@@ -20,7 +20,7 @@ type Env struct {
 }
 
 func main() {
-	godotenv.Load(".env")
+	godotenv.Load()
 	env := NewEnv()
 	fmt.Println(env)
 }

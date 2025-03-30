@@ -1,4 +1,4 @@
-package appenv
+package main
 
 import (
 	"fmt"

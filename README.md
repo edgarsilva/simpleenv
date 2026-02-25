@@ -62,7 +62,22 @@ Examples:
 - `min=n`: numeric value must be `>= n`
 - `max=n`: numeric value must be `<= n`
 - `regex=pattern`: value must match regex (single or double quoted patterns are supported)
-- `format=URL`: value must be a valid `http`/`https` URL
+- `format=...`: value must match one of the supported formats below
+
+### Supported `format` Values
+
+- `URL`: valid `http`/`https` URL
+- `URI`: valid URI with a scheme
+- `FILE`: existing file path
+- `DIR`: existing directory path
+- `HOSTPORT`: valid `host:port` value
+- `UUID`: valid UUID (canonical hyphenated form)
+- `IP`: valid IPv4 or IPv6 address
+- `HEX`: hexadecimal string (`0-9`, `a-f`, `A-F`)
+- `ALPHANUMERIC`: letters and numbers only
+- `IDENTIFIER`: letters, numbers, `_`, and `-` only
+
+Note: only one format value is allowed (`format=URL` is valid, `format=URL|FILE` is rejected).
 
 ## Behavior Notes
 

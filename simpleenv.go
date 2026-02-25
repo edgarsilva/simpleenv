@@ -5,6 +5,7 @@ package simpleenv
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"reflect"
@@ -37,7 +38,9 @@ func fieldConstraintError(fieldName, envKey, envValue, expected string) error {
 //	- oneof: the environment variable must be one of the values in the `oneof` constraint list (separeted by commas)
 //	- min: the environment variable must be greater than or equal to the value in the `min` constraint
 //	- regex: the environment variable must match the regex pattern in the `regex` constraint
-//	- format: the environment variable must match the format in the `format` constraint (only URL is supported)
+//	- format: the environment variable must match the format in the `format` constraint
+//	  supported formats: URL, URI, FILE, DIR, HOSTPORT, UUID, IP, HEX, ALPHANUMERIC, IDENTIFIER
+//	  note: only one format value is supported (e.g. `format=URL`)
 //
 //	example:
 //		type AppEnv struct {
@@ -203,12 +206,17 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("to match regex %q", patternstr))
 			}
 		case strings.HasPrefix(constraint, "format="):
-			format := strings.TrimPrefix(constraint, "format=")
-			if !strings.EqualFold(format, "URL") {
+			format := strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(constraint, "format=")))
+			if strings.Contains(format, "|") {
+				return fmt.Errorf("invalid tag for field %q (ENV[%q]): multiple format values are not supported, got %q", fieldType.Name, envKey, format)
+			}
+
+			expected, ok := validateFormat(format, envValue)
+			if expected == "" {
 				return fmt.Errorf("invalid tag for field %q (ENV[%q]): unsupported format %q", fieldType.Name, envKey, format)
 			}
-			if !isValidURL(envValue) {
-				return fieldConstraintError(fieldType.Name, envKey, envValue, "a valid URL with http/https scheme")
+			if !ok {
+				return fieldConstraintError(fieldType.Name, envKey, envValue, expected)
 			}
 		default:
 			return fmt.Errorf("invalid tag for field %q (ENV[%q]): unsupported constraint %q", fieldType.Name, envKey, constraint)
@@ -298,4 +306,87 @@ func isValidURL(s string) bool {
 	}
 
 	return false
+}
+
+func validateFormat(format, value string) (expected string, ok bool) {
+	switch format {
+	case "URL":
+		return "a valid URL with http/https scheme", isValidURL(value)
+	case "URI":
+		return "a valid URI with scheme", isValidURI(value)
+	case "FILE":
+		return "an existing file path", isExistingFile(value)
+	case "DIR":
+		return "an existing directory path", isExistingDir(value)
+	case "HOSTPORT":
+		return "a valid host:port value", isValidHostPort(value)
+	case "UUID":
+		return "a valid UUID", isValidUUID(value)
+	case "IP":
+		return "a valid IPv4 or IPv6 address", isValidIP(value)
+	case "HEX":
+		return "a valid hexadecimal value", isHex(value)
+	case "ALPHANUMERIC":
+		return "a value containing only letters and numbers", isAlphanumeric(value)
+	case "IDENTIFIER":
+		return "a value containing only letters, numbers, underscores, or hyphens", isIdentifier(value)
+	default:
+		return "", false
+	}
+}
+
+func isValidURI(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+
+	return u.Scheme != ""
+}
+
+func isExistingFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return !info.IsDir()
+}
+
+func isExistingDir(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.IsDir()
+}
+
+func isValidHostPort(value string) bool {
+	_, _, err := net.SplitHostPort(value)
+	return err == nil
+}
+
+func isValidUUID(value string) bool {
+	match, _ := regexp.MatchString(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`, value)
+	return match
+}
+
+func isValidIP(value string) bool {
+	return net.ParseIP(value) != nil
+}
+
+func isHex(value string) bool {
+	match, _ := regexp.MatchString(`^[0-9a-fA-F]+$`, value)
+	return match
+}
+
+func isAlphanumeric(value string) bool {
+	match, _ := regexp.MatchString(`^[A-Za-z0-9]+$`, value)
+	return match
+}
+
+func isIdentifier(value string) bool {
+	match, _ := regexp.MatchString(`^[A-Za-z0-9_-]+$`, value)
+	return match
 }

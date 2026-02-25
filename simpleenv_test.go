@@ -250,3 +250,164 @@ func TestLoadErrorMessageIncludesFieldEnvAndExpected(t *testing.T) {
 		t.Fatalf("expected error to include expected constraint, got %q", errStr)
 	}
 }
+
+func TestLoadFormatURIValid(t *testing.T) {
+	type cfg struct {
+		DatabaseURI string `env:"SIMPLEENV_TEST_FORMAT_URI;format=URI"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_URI", "postgres://localhost:5432/mydb")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid URI format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatFILEValid(t *testing.T) {
+	type cfg struct {
+		ConfigPath string `env:"SIMPLEENV_TEST_FORMAT_FILE;format=FILE"`
+	}
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "simpleenv-file-*.txt")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	_ = tmpFile.Close()
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_FILE", tmpFile.Name())
+
+	var c cfg
+	err = Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid FILE format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatDIRValid(t *testing.T) {
+	type cfg struct {
+		WorkDir string `env:"SIMPLEENV_TEST_FORMAT_DIR;format=DIR"`
+	}
+
+	path := t.TempDir()
+	t.Setenv("SIMPLEENV_TEST_FORMAT_DIR", path)
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid DIR format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatHOSTPORTValid(t *testing.T) {
+	type cfg struct {
+		BindAddress string `env:"SIMPLEENV_TEST_FORMAT_HOSTPORT;format=HOSTPORT"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_HOSTPORT", "127.0.0.1:8080")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid HOSTPORT format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatMultipleValuesNotSupported(t *testing.T) {
+	type cfg struct {
+		Path string `env:"SIMPLEENV_TEST_FORMAT_MULTI;format=URL|FILE"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_MULTI", "http://localhost:8080")
+
+	var c cfg
+	err := Load(&c)
+	if err == nil {
+		t.Fatal("expected error for multiple format values, got nil")
+	}
+}
+
+func TestLoadFormatUUIDValid(t *testing.T) {
+	type cfg struct {
+		RequestID string `env:"SIMPLEENV_TEST_FORMAT_UUID;format=UUID"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_UUID", "550e8400-e29b-41d4-a716-446655440000")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid UUID format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatIPValid(t *testing.T) {
+	type cfg struct {
+		Address string `env:"SIMPLEENV_TEST_FORMAT_IP;format=IP"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_IP", "2001:db8::1")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid IP format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatHEXValid(t *testing.T) {
+	type cfg struct {
+		Token string `env:"SIMPLEENV_TEST_FORMAT_HEX;format=HEX"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_HEX", "a1B2c3D4")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid HEX format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatALPHANUMERICValid(t *testing.T) {
+	type cfg struct {
+		Code string `env:"SIMPLEENV_TEST_FORMAT_ALNUM;format=ALPHANUMERIC"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_ALNUM", "abc123XYZ")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid ALPHANUMERIC format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatIDENTIFIERValid(t *testing.T) {
+	type cfg struct {
+		Name string `env:"SIMPLEENV_TEST_FORMAT_IDENTIFIER;format=IDENTIFIER"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_IDENTIFIER", "my-app_name_01")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected valid IDENTIFIER format to pass, got %v", err)
+	}
+}
+
+func TestLoadFormatIDENTIFIERInvalid(t *testing.T) {
+	type cfg struct {
+		Name string `env:"SIMPLEENV_TEST_FORMAT_IDENTIFIER_BAD;format=IDENTIFIER"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_FORMAT_IDENTIFIER_BAD", "not valid")
+
+	var c cfg
+	err := Load(&c)
+	if err == nil {
+		t.Fatal("expected invalid IDENTIFIER format to fail, got nil")
+	}
+}

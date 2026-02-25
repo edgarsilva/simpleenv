@@ -1,11 +1,27 @@
 # simpleenv
 
+[![CI](https://github.com/edgarsilva/simpleenv/actions/workflows/ci.yml/badge.svg)](https://github.com/edgarsilva/simpleenv/actions/workflows/ci.yml)
+[![Go Test](https://github.com/edgarsilva/simpleenv/actions/workflows/go-test.yml/badge.svg)](https://github.com/edgarsilva/simpleenv/actions/workflows/go-test.yml)
+
 `simpleenv` maps environment variables into a Go struct and validates values using `env` struct tags.
 
 ## Install
 
 ```bash
 go get github.com/edgarsilva/simpleenv
+```
+
+## Upgrade
+
+```bash
+go get github.com/edgarsilva/simpleenv@v1.1.0
+go mod tidy
+```
+
+To verify the resolved version:
+
+```bash
+go list -m github.com/edgarsilva/simpleenv
 ```
 
 ## Quick Start

@@ -1,3 +1,5 @@
+// Package simpleenv provides a simple way to configure your application
+// environment variables using struct tags
 package simpleenv
 
 import (
@@ -11,6 +13,13 @@ import (
 	"strconv"
 	"strings"
 )
+
+type envTag struct {
+	key      string
+	options  []string
+	optional bool
+	hasTag   bool
+}
 
 // Load loads environment variables into the given struct
 // and validates the constraints specified in the struct tags
@@ -43,27 +52,58 @@ import (
 // Load will return an error if the environment variables are not set
 // (unless marked as optional) or if the value does not match the constraints
 func Load(envConfig any) error {
-	fmt.Println("🚀 Loading env vars...")
 	v := reflect.ValueOf(envConfig)
+	if !v.IsValid() {
+		return errors.New("failed to load env config, got nil value")
+	}
+
+	if v.Kind() == reflect.Struct {
+		return errors.New("failed to load env config, expected pointer to struct (pass &cfg)")
+	}
+
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return errors.New("failed to load env config, expected a non-nil pointer to an EnvConfig struct")
+	}
+
 	e := v.Elem()
+	if e.Kind() != reflect.Struct {
+		return errors.New("failed to load env config, expected a pointer to a struct")
+	}
+
 	t := e.Type()
 
-	fmt.Printf("🔎 Scanning env vars...")
 	for i := range t.NumField() {
 		fieldType := t.Field(i)
 		fieldValue := e.Field(i)
 
-		envValue, err := parseValueFromEnv(fieldType)
+		fieldTag, err := parseEnvTag(fieldType)
+		if err != nil {
+			return err
+		}
+		if !fieldTag.hasTag {
+			continue
+		}
+
+		envValue, found := os.LookupEnv(fieldTag.key)
+		if !found {
+			if fieldTag.optional {
+				continue
+			}
+
+			return fmt.Errorf("failed to find value for ENV[\"%v\"], which is required in the AppEnv struct field '%v'", fieldTag.key, fieldType.Name)
+		}
+
+		err = validateConstraints(fieldType, fieldTag.options, envValue)
 		if err != nil {
 			return err
 		}
 
-		err = validateConstraints(fieldType)
+		parsedValue, err := parseValueFromEnv(fieldType, fieldTag.key, envValue)
 		if err != nil {
 			return err
 		}
 
-		_, err = assignFieldValue(fieldValue, envValue)
+		err = assignFieldValue(fieldValue, parsedValue)
 		if err != nil {
 			return err
 		}
@@ -72,20 +112,41 @@ func Load(envConfig any) error {
 	return nil
 }
 
-func validateConstraints(fieldType reflect.StructField) error {
+func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
 	tag := fieldType.Tag.Get("env")
-	tagOptions := strings.Split(tag, ";")
-	if len(tagOptions) < 1 {
-		return errors.New("failed to find env var name, missing struct tag? e.g. `env:\"environment\"`")
+	if strings.TrimSpace(tag) == "" {
+		return envTag{hasTag: false}, nil
 	}
 
+	rawTagOptions := strings.Split(tag, ";")
+	tagOptions := make([]string, 0, len(rawTagOptions))
+	for _, option := range rawTagOptions {
+		tagOptions = append(tagOptions, strings.TrimSpace(option))
+	}
+
+	if len(tagOptions) < 1 || strings.TrimSpace(tagOptions[0]) == "" {
+		return envTag{}, errors.New("failed to find env var name, missing struct tag? e.g. `env:\"environment\"`")
+	}
+
+	envKey := strings.TrimSpace(tagOptions[0])
+	optional := slices.Contains(tagOptions, "optional")
+
+	return envTag{
+		key:      envKey,
+		options:  tagOptions,
+		optional: optional,
+		hasTag:   true,
+	}, nil
+}
+
+func validateConstraints(fieldType reflect.StructField, tagOptions []string, envValue string) error {
 	envKey := tagOptions[0]
-	envValue := os.Getenv(envKey)
 
 	for _, constraint := range tagOptions {
-		if envValue == "" && !slices.Contains(tagOptions, "optional") {
-			return fmt.Errorf("failed to find value for ENV[\"%v\"], which is required in the AppEnv struct field '%v'", envKey, fieldType.Name)
+		if constraint == "" || constraint == "optional" {
+			continue
 		}
+
 		switch {
 		case strings.HasPrefix(constraint, "oneof="):
 			strOpts := strings.TrimPrefix(constraint, "oneof=")
@@ -132,7 +193,7 @@ func validateConstraints(fieldType reflect.StructField) error {
 		case strings.HasPrefix(constraint, "format="):
 			format := strings.TrimPrefix(constraint, "format=")
 			if format != "URL" {
-				return nil
+				return fmt.Errorf("failed to validate env var %v, unsupported format constraint '%v'", envKey, format)
 			}
 			if !isValidURL(envValue) {
 				return fmt.Errorf("failed URL format for env var %v, with regex constraint in struct tag %v", envKey, fieldType.Name)
@@ -144,16 +205,7 @@ func validateConstraints(fieldType reflect.StructField) error {
 	return nil
 }
 
-func parseValueFromEnv(fieldType reflect.StructField) (reflect.Value, error) {
-	tag := fieldType.Tag.Get("env")
-	tagOptions := strings.Split(tag, ";")
-	if len(tagOptions) < 1 {
-		return reflect.Value{}, errors.New("failed to find env var name, missing struct tag env? e.g. `env:\"environment\"`")
-	}
-
-	envKey := tagOptions[0]
-	envValue := os.Getenv(envKey)
-
+func parseValueFromEnv(fieldType reflect.StructField, envKey, envValue string) (reflect.Value, error) {
 	switch fieldType.Type.Kind() {
 	case reflect.String:
 		return reflect.ValueOf(envValue), nil
@@ -177,21 +229,21 @@ func parseValueFromEnv(fieldType reflect.StructField) (reflect.Value, error) {
 	}
 }
 
-func assignFieldValue(field reflect.Value, val reflect.Value) (reflect.Value, error) {
+func assignFieldValue(field reflect.Value, val reflect.Value) error {
 	if !field.IsValid() {
-		return field, errors.New("failed to assign struct field value, field is not valid")
+		return errors.New("failed to assign struct field value, field is not valid")
 	}
 
 	if !field.CanSet() {
-		return field, errors.New("failed to assign struct field value, field can't be set")
+		return errors.New("failed to assign struct field value, field can't be set")
 	}
 
 	if field.Type() != val.Type() {
-		return field, errors.New("failed to assign struct field value, types don't match")
+		return errors.New("failed to assign struct field value, types don't match")
 	}
 
 	field.Set(val)
-	return field, nil
+	return nil
 }
 
 func matchRegex(pattern, str string) (bool, error) {

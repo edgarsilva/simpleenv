@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.1.2] - 2026-02-25
+
+### Added
+- Added `min` and `max` constraint support for `time.Duration` fields using duration values (for example: `500ms`, `2s`, `1m`).
+
+### Changed
+- Updated docs to clarify that `min`/`max` work with numeric types and `time.Duration`.
+- Added validation tests for duration min/max success and failure scenarios.
+
 ## [v1.1.1] - 2026-02-25
 
 ### Added

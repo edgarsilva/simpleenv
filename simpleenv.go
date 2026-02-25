@@ -50,6 +50,7 @@ func loadInputError(expected string) error {
 //	- allowempty: only for string or text unmarshaler fields; allows KEY="" when present
 //	- oneof: the environment variable must be one of the values in the `oneof` constraint list (separeted by commas)
 //	- min: the environment variable must be greater than or equal to the value in the `min` constraint
+//	- max: the environment variable must be less than or equal to the value in the `max` constraint
 //	- regex: the environment variable must match the regex pattern in the `regex` constraint
 //	- format: the environment variable must match the format in the `format` constraint
 //	  supported formats: URL, URI, FILE, DIR, HOSTPORT, UUID, IP, HEX, ALPHANUMERIC, IDENTIFIER
@@ -204,6 +205,25 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 			}
 		case strings.HasPrefix(constraint, "min="):
 			minstr := strings.TrimPrefix(constraint, "min=")
+
+			if fieldType.Type == timeDurationType {
+				minDuration, err := time.ParseDuration(minstr)
+				if err != nil {
+					return fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid duration", fieldType.Name, envKey, constraint)
+				}
+
+				fieldDuration, err := time.ParseDuration(envValue)
+				if err != nil {
+					return fieldConstraintError(fieldType.Name, envKey, envValue, "a valid duration for min comparison")
+				}
+
+				if fieldDuration < minDuration {
+					return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("a value >= %s", minstr))
+				}
+
+				continue
+			}
+
 			min, err := strconv.ParseFloat(minstr, 64)
 			if err != nil {
 				return fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid number", fieldType.Name, envKey, constraint)
@@ -219,6 +239,25 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 			}
 		case strings.HasPrefix(constraint, "max="):
 			maxstr := strings.TrimPrefix(constraint, "max=")
+
+			if fieldType.Type == timeDurationType {
+				maxDuration, err := time.ParseDuration(maxstr)
+				if err != nil {
+					return fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid duration", fieldType.Name, envKey, constraint)
+				}
+
+				fieldDuration, err := time.ParseDuration(envValue)
+				if err != nil {
+					return fieldConstraintError(fieldType.Name, envKey, envValue, "a valid duration for max comparison")
+				}
+
+				if fieldDuration > maxDuration {
+					return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("a value <= %s", maxstr))
+				}
+
+				continue
+			}
+
 			max, err := strconv.ParseFloat(maxstr, 64)
 			if err != nil {
 				return fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid number", fieldType.Name, envKey, constraint)

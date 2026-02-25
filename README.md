@@ -89,8 +89,8 @@ Examples:
 - Missing optional env vars keep whatever value was already in the struct (or zero value if it started empty).
 - `allowempty`: only for `string` or `encoding.TextUnmarshaler` fields; allows `MY_ENV_VAR=` when the key exists.
 - `oneof=a,b,c`: value must match one option
-- `min=n`: numeric value must be `>= n`
-- `max=n`: numeric value must be `<= n`
+- `min=n`: numeric value must be `>= n` (for `time.Duration`, use duration values like `500ms`, `2s`, `1m`)
+- `max=n`: numeric value must be `<= n` (for `time.Duration`, use duration values like `500ms`, `2s`, `1m`)
 - `regex=pattern`: value must match regex (single or double quoted patterns are supported)
 - `format=...`: value must match one of the supported formats below
 

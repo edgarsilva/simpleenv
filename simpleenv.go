@@ -21,6 +21,10 @@ type envTag struct {
 	hasTag   bool
 }
 
+func fieldConstraintError(fieldName, envKey, envValue, expected string) error {
+	return fmt.Errorf("invalid value for field %q from ENV[%q]: got %q, expected %s", fieldName, envKey, envValue, expected)
+}
+
 // Load loads environment variables into the given struct
 // and validates the constraints specified in the struct tags
 //
@@ -90,7 +94,7 @@ func Load(envConfig any) error {
 				continue
 			}
 
-			return fmt.Errorf("failed to find value for ENV[\"%v\"], which is required in the AppEnv struct field '%v'", fieldTag.key, fieldType.Name)
+			return fieldConstraintError(fieldType.Name, fieldTag.key, "<unset>", "a value to set or to be marked as optional")
 		}
 
 		err = validateConstraints(fieldType, fieldTag.options, envValue)
@@ -113,19 +117,27 @@ func Load(envConfig any) error {
 }
 
 func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
-	tag := fieldType.Tag.Get("env")
-	if strings.TrimSpace(tag) == "" {
+	tagValue, hasEnvTag := fieldType.Tag.Lookup("env")
+	if !hasEnvTag {
+		if strings.Contains(string(fieldType.Tag), "env:") {
+			return envTag{}, fmt.Errorf("invalid tag for field %q: malformed env tag, expected env:\"ENV_KEY;...\"", fieldType.Name)
+		}
+
 		return envTag{hasTag: false}, nil
 	}
 
-	rawTagOptions := strings.Split(tag, ";")
+	if strings.TrimSpace(tagValue) == "" {
+		return envTag{}, fmt.Errorf("invalid tag for field %q: env key cannot be empty", fieldType.Name)
+	}
+
+	rawTagOptions := strings.Split(tagValue, ";")
 	tagOptions := make([]string, 0, len(rawTagOptions))
 	for _, option := range rawTagOptions {
 		tagOptions = append(tagOptions, strings.TrimSpace(option))
 	}
 
 	if len(tagOptions) < 1 || strings.TrimSpace(tagOptions[0]) == "" {
-		return envTag{}, errors.New("failed to find env var name, missing struct tag? e.g. `env:\"environment\"`")
+		return envTag{}, fmt.Errorf("invalid tag for field %q: env key cannot be empty", fieldType.Name)
 	}
 
 	envKey := strings.TrimSpace(tagOptions[0])
@@ -142,7 +154,7 @@ func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
 func validateConstraints(fieldType reflect.StructField, tagOptions []string, envValue string) error {
 	envKey := tagOptions[0]
 
-	for _, constraint := range tagOptions {
+	for _, constraint := range tagOptions[1:] {
 		if constraint == "" || constraint == "optional" {
 			continue
 		}
@@ -152,53 +164,54 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 			strOpts := strings.TrimPrefix(constraint, "oneof=")
 			opts := strings.Split(strOpts, ",")
 			if !slices.Contains(opts, envValue) {
-				return fmt.Errorf("failed to match env var %v with value '%v', must be one of [%v]", fieldType.Name, envValue, strOpts)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("one of [%s]", strOpts))
 			}
 		case strings.HasPrefix(constraint, "min="):
 			minstr := strings.TrimPrefix(constraint, "min=")
 			min, err := strconv.ParseFloat(minstr, 64)
 			if err != nil {
-				return fmt.Errorf("failed to parse min value for %v, in struct tag min=", fieldType.Name)
+				return fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid number", fieldType.Name, envKey, constraint)
 			}
 
 			fieldValue, err := strconv.ParseFloat(envValue, 64)
 			if err != nil {
-				return fmt.Errorf("failed to parse float value in env var %v, for struct tag constraint %v", envKey, fieldType.Name)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, "a numeric value for min comparison")
 			}
 
 			if fieldValue < min {
-				return fmt.Errorf("failed min value constraint for envvar[%v] in struct field %v, %v", envKey, fieldType.Name, constraint)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("a value >= %s", minstr))
 			}
 		case strings.HasPrefix(constraint, "max="):
 			maxstr := strings.TrimPrefix(constraint, "max=")
 			max, err := strconv.ParseFloat(maxstr, 64)
 			if err != nil {
-				return fmt.Errorf("failed to parse max value for %v, in struct tag max=", fieldType.Name)
+				return fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid number", fieldType.Name, envKey, constraint)
 			}
 
 			fieldValue, err := strconv.ParseFloat(envValue, 64)
 			if err != nil {
-				return fmt.Errorf("failed to parse float value in envvar[%v], for struct tag constraint %v", envKey, fieldType.Name)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, "a numeric value for max comparison")
 			}
 
 			if fieldValue > max {
-				return fmt.Errorf("failed max value constraint for envvar[%v] in struct field %v, %v", envKey, fieldType.Name, constraint)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("a value <= %s", maxstr))
 			}
 		case strings.HasPrefix(constraint, "regex="):
-			patternstr := strings.TrimPrefix(constraint, "regex=")
+			patternstr := normalizeQuotedValue(strings.TrimPrefix(constraint, "regex="))
 			_, err := matchRegex(patternstr, envValue)
 			if err != nil {
-				return fmt.Errorf("failed regex match for env var %v, with regex constraint in struct tag %v", envKey, fieldType.Name)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("to match regex %q", patternstr))
 			}
 		case strings.HasPrefix(constraint, "format="):
 			format := strings.TrimPrefix(constraint, "format=")
-			if format != "URL" {
-				return fmt.Errorf("failed to validate env var %v, unsupported format constraint '%v'", envKey, format)
+			if !strings.EqualFold(format, "URL") {
+				return fmt.Errorf("invalid tag for field %q (ENV[%q]): unsupported format %q", fieldType.Name, envKey, format)
 			}
 			if !isValidURL(envValue) {
-				return fmt.Errorf("failed URL format for env var %v, with regex constraint in struct tag %v", envKey, fieldType.Name)
+				return fieldConstraintError(fieldType.Name, envKey, envValue, "a valid URL with http/https scheme")
 			}
 		default:
+			return fmt.Errorf("invalid tag for field %q (ENV[%q]): unsupported constraint %q", fieldType.Name, envKey, constraint)
 		}
 	}
 
@@ -213,19 +226,19 @@ func parseValueFromEnv(fieldType reflect.StructField, envKey, envValue string) (
 	case reflect.Int:
 		intValue, err := strconv.Atoi(envValue)
 		if err != nil {
-			return reflect.Value{}, fmt.Errorf("failed to cast env variable '%v' value to int, struct field '%v: type %v'", envKey, fieldType.Name, fieldType.Type)
+			return reflect.Value{}, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid int")
 		}
 
 		return reflect.ValueOf(intValue), nil
 	case reflect.Float64:
 		floatValue, err := strconv.ParseFloat(envValue, 64)
 		if err != nil {
-			return reflect.Value{}, fmt.Errorf("failed to parse env variable '%v' value to float64, struct field '%v: type %v'", envKey, fieldType.Name, fieldType.Type)
+			return reflect.Value{}, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid float64")
 		}
 
 		return reflect.ValueOf(floatValue), nil
 	default:
-		return reflect.Value{}, fmt.Errorf("failed to parse env variable '%v' into struct field '%v: type %v'", envKey, fieldType.Name, fieldType.Type)
+		return reflect.Value{}, fmt.Errorf("unsupported type for field %q (ENV[%q]): %v", fieldType.Name, envKey, fieldType.Type)
 	}
 }
 
@@ -257,6 +270,18 @@ func matchRegex(pattern, str string) (bool, error) {
 		return false, errors.New("env var value does not match given pattern")
 	}
 	return true, nil
+}
+
+func normalizeQuotedValue(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+
+	if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+		return s[1 : len(s)-1]
+	}
+
+	return s
 }
 
 func isValidURL(s string) bool {

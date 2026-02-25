@@ -2,6 +2,8 @@ package simpleenv
 
 import (
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -169,5 +171,82 @@ func TestLoadSkipsFieldsWithoutEnvTag(t *testing.T) {
 
 	if c.DefaultValue != "" {
 		t.Fatalf("expected untagged field to keep zero value, got %q", c.DefaultValue)
+	}
+}
+
+func TestLoadEmptyEnvTagValueReturnsError(t *testing.T) {
+	type cfg struct {
+		APITestNoEnvNameInTag string `env:""`
+	}
+
+	var c cfg
+	err := Load(&c)
+	if err == nil {
+		t.Fatal("expected error for empty env tag value, got nil")
+	}
+}
+
+func TestLoadMalformedEnvTagReturnsError(t *testing.T) {
+	field := reflect.StructField{
+		Name: "APITestNoEnvNameInTag",
+		Tag:  reflect.StructTag(`env:`),
+	}
+
+	_, err := parseEnvTag(field)
+	if err == nil {
+		t.Fatal("expected error for malformed env tag, got nil")
+	}
+}
+
+func TestLoadUnknownConstraintReturnsError(t *testing.T) {
+	type cfg struct {
+		Name string `env:"SIMPLEENV_TEST_UNKNOWN_CONSTRAINT;nope=value"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_UNKNOWN_CONSTRAINT", "john")
+
+	var c cfg
+	err := Load(&c)
+	if err == nil {
+		t.Fatal("expected error for unknown constraint, got nil")
+	}
+}
+
+func TestLoadRegexConstraintSupportsQuotedPattern(t *testing.T) {
+	type cfg struct {
+		PubsubHostURL string `env:"SIMPLEENV_TEST_REGEX_QUOTED;regex='(http|https)://(localhost|127.0.0.1):[0-9]+'"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_REGEX_QUOTED", "http://localhost:8085")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected no error for quoted regex pattern, got %v", err)
+	}
+}
+
+func TestLoadErrorMessageIncludesFieldEnvAndExpected(t *testing.T) {
+	type cfg struct {
+		Concurrency int `env:"SIMPLEENV_TEST_ERROR_SHAPE;min=1"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_ERROR_SHAPE", "abc")
+
+	var c cfg
+	err := Load(&c)
+	if err == nil {
+		t.Fatal("expected validation/parsing error, got nil")
+	}
+
+	errStr := err.Error()
+	if !strings.Contains(errStr, "field \"Concurrency\"") {
+		t.Fatalf("expected error to include field name, got %q", errStr)
+	}
+	if !strings.Contains(errStr, "ENV[\"SIMPLEENV_TEST_ERROR_SHAPE\"]") {
+		t.Fatalf("expected error to include env key, got %q", errStr)
+	}
+	if !strings.Contains(errStr, "expected") {
+		t.Fatalf("expected error to include expected constraint, got %q", errStr)
 	}
 }

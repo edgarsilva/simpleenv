@@ -5,7 +5,19 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+type customToken string
+
+func (c *customToken) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return nil
+	}
+
+	*c = customToken("token:" + string(text))
+	return nil
+}
 
 func unsetEnv(t *testing.T, key string) {
 	t.Helper()
@@ -409,5 +421,117 @@ func TestLoadFormatIDENTIFIERInvalid(t *testing.T) {
 	err := Load(&c)
 	if err == nil {
 		t.Fatal("expected invalid IDENTIFIER format to fail, got nil")
+	}
+}
+
+func TestLoadBoolTypeValid(t *testing.T) {
+	type cfg struct {
+		FeatureEnabled bool `env:"SIMPLEENV_TEST_BOOL"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_BOOL", "true")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected bool parsing to pass, got %v", err)
+	}
+
+	if !c.FeatureEnabled {
+		t.Fatal("expected bool field to be true")
+	}
+}
+
+func TestLoadInt64TypeValid(t *testing.T) {
+	type cfg struct {
+		MaxBytes int64 `env:"SIMPLEENV_TEST_INT64"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_INT64", "922337203685477580")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected int64 parsing to pass, got %v", err)
+	}
+
+	if c.MaxBytes != 922337203685477580 {
+		t.Fatalf("expected parsed int64 value, got %d", c.MaxBytes)
+	}
+}
+
+func TestLoadUintTypeValid(t *testing.T) {
+	type cfg struct {
+		WorkerCount uint `env:"SIMPLEENV_TEST_UINT"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_UINT", "12")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected uint parsing to pass, got %v", err)
+	}
+
+	if c.WorkerCount != 12 {
+		t.Fatalf("expected parsed uint value 12, got %d", c.WorkerCount)
+	}
+}
+
+func TestLoadDurationTypeValid(t *testing.T) {
+	type cfg struct {
+		Timeout time.Duration `env:"SIMPLEENV_TEST_DURATION"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_DURATION", "2m30s")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected duration parsing to pass, got %v", err)
+	}
+
+	if c.Timeout != 150*time.Second {
+		t.Fatalf("expected parsed duration 150s, got %v", c.Timeout)
+	}
+}
+
+func TestLoadTextUnmarshalerTypeValid(t *testing.T) {
+	type cfg struct {
+		Token customToken `env:"SIMPLEENV_TEST_TEXT_UNMARSHALER"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_TEXT_UNMARSHALER", "abc123")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected text unmarshaler parsing to pass, got %v", err)
+	}
+
+	if c.Token != "token:abc123" {
+		t.Fatalf("expected custom token value, got %q", c.Token)
+	}
+}
+
+func TestLoadTextUnmarshalerPointerTypeValid(t *testing.T) {
+	type cfg struct {
+		Token *customToken `env:"SIMPLEENV_TEST_TEXT_UNMARSHALER_PTR"`
+	}
+
+	t.Setenv("SIMPLEENV_TEST_TEXT_UNMARSHALER_PTR", "xyz789")
+
+	var c cfg
+	err := Load(&c)
+	if err != nil {
+		t.Fatalf("expected pointer text unmarshaler parsing to pass, got %v", err)
+	}
+
+	if c.Token == nil {
+		t.Fatal("expected pointer token to be initialized")
+	}
+
+	if *c.Token != "token:xyz789" {
+		t.Fatalf("expected pointer custom token value, got %q", *c.Token)
 	}
 }

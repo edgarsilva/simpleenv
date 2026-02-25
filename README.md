@@ -52,8 +52,13 @@ Examples:
 ## Supported Field Types
 
 - `string`
+- `bool`
 - `int`
+- `int64`
+- `uint`
 - `float64`
+- `time.Duration`
+- custom types implementing `encoding.TextUnmarshaler`
 
 ## Supported Constraints
 

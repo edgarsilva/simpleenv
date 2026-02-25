@@ -3,6 +3,7 @@
 package simpleenv
 
 import (
+	"encoding"
 	"errors"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type envTag struct {
@@ -21,6 +23,11 @@ type envTag struct {
 	optional bool
 	hasTag   bool
 }
+
+var (
+	timeDurationType    = reflect.TypeOf(time.Duration(0))
+	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+)
 
 func fieldConstraintError(fieldName, envKey, envValue, expected string) error {
 	return fmt.Errorf("invalid value for field %q from ENV[%q]: got %q, expected %s", fieldName, envKey, envValue, expected)
@@ -41,6 +48,16 @@ func fieldConstraintError(fieldName, envKey, envValue, expected string) error {
 //	- format: the environment variable must match the format in the `format` constraint
 //	  supported formats: URL, URI, FILE, DIR, HOSTPORT, UUID, IP, HEX, ALPHANUMERIC, IDENTIFIER
 //	  note: only one format value is supported (e.g. `format=URL`)
+//
+//	supported field types:
+//	- string
+//	- bool
+//	- int
+//	- int64
+//	- uint
+//	- float64
+//	- time.Duration
+//	- custom types implementing encoding.TextUnmarshaler
 //
 //	example:
 //		type AppEnv struct {
@@ -227,9 +244,29 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 }
 
 func parseValueFromEnv(fieldType reflect.StructField, envKey, envValue string) (reflect.Value, error) {
+	if fieldType.Type == timeDurationType {
+		durationValue, err := time.ParseDuration(envValue)
+		if err != nil {
+			return reflect.Value{}, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid time.Duration (for example: 500ms, 2s, 1m)")
+		}
+
+		return reflect.ValueOf(durationValue), nil
+	}
+
+	if unmarshaledValue, ok, err := parseWithTextUnmarshaler(fieldType, envKey, envValue); ok || err != nil {
+		return unmarshaledValue, err
+	}
+
 	switch fieldType.Type.Kind() {
 	case reflect.String:
 		return reflect.ValueOf(envValue), nil
+	case reflect.Bool:
+		boolValue, err := strconv.ParseBool(envValue)
+		if err != nil {
+			return reflect.Value{}, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid bool")
+		}
+
+		return reflect.ValueOf(boolValue), nil
 
 	case reflect.Int:
 		intValue, err := strconv.Atoi(envValue)
@@ -238,6 +275,20 @@ func parseValueFromEnv(fieldType reflect.StructField, envKey, envValue string) (
 		}
 
 		return reflect.ValueOf(intValue), nil
+	case reflect.Int64:
+		int64Value, err := strconv.ParseInt(envValue, 10, 64)
+		if err != nil {
+			return reflect.Value{}, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid int64")
+		}
+
+		return reflect.ValueOf(int64Value), nil
+	case reflect.Uint:
+		uintValue, err := strconv.ParseUint(envValue, 10, strconv.IntSize)
+		if err != nil {
+			return reflect.Value{}, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid uint")
+		}
+
+		return reflect.ValueOf(uint(uintValue)), nil
 	case reflect.Float64:
 		floatValue, err := strconv.ParseFloat(envValue, 64)
 		if err != nil {
@@ -248,6 +299,37 @@ func parseValueFromEnv(fieldType reflect.StructField, envKey, envValue string) (
 	default:
 		return reflect.Value{}, fmt.Errorf("unsupported type for field %q (ENV[%q]): %v", fieldType.Name, envKey, fieldType.Type)
 	}
+}
+
+func parseWithTextUnmarshaler(fieldType reflect.StructField, envKey, envValue string) (reflect.Value, bool, error) {
+	isPointerField := fieldType.Type.Kind() == reflect.Pointer
+	valuePtr := castToValuePtr(fieldType)
+
+	if !valuePtr.Type().Implements(textUnmarshalerType) {
+		return reflect.Value{}, false, nil
+	}
+
+	unmarshaler := valuePtr.Interface().(encoding.TextUnmarshaler)
+	if err := unmarshaler.UnmarshalText([]byte(envValue)); err != nil {
+		return reflect.Value{}, true, fieldConstraintError(fieldType.Name, envKey, envValue, "a valid value for custom text unmarshaler")
+	}
+
+	if isPointerField {
+		return valuePtr, true, nil
+	}
+
+	return valuePtr.Elem(), true, nil
+}
+
+func castToValuePtr(fieldType reflect.StructField) reflect.Value {
+	var valuePtr reflect.Value
+	if fieldType.Type.Kind() == reflect.Pointer {
+		valuePtr = reflect.New(fieldType.Type.Elem())
+	} else {
+		valuePtr = reflect.New(fieldType.Type)
+	}
+
+	return valuePtr
 }
 
 func assignFieldValue(field reflect.Value, val reflect.Value) error {

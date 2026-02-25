@@ -76,9 +76,10 @@ func loadInputError(expected string) error {
 //
 //		appEnv.Environment // "development"
 //
-// Make sure to pass a pointer to the struct, otherwise it will panic
-// Load will return an error if the environment variables are not set
-// (unless marked as optional) or if the value does not match the constraints
+// Make sure to pass a non-nil pointer to a struct (for example: &cfg),
+// otherwise Load returns an input validation error.
+// Load also returns an error if required environment variables are not set
+// or if any value does not match the constraints.
 func Load(envConfig any) error {
 	v := reflect.ValueOf(envConfig)
 	if !v.IsValid() {

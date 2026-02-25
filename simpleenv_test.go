@@ -34,504 +34,313 @@ func unsetEnv(t *testing.T, key string) {
 	})
 }
 
-func TestLoadOptionalIntMissingSkipsParsing(t *testing.T) {
-	type cfg struct {
-		Concurrency int `env:"SIMPLEENV_TEST_OPTIONAL_INT;optional"`
+func strPtr(s string) *string {
+	return &s
+}
+
+func loadSingleField(t *testing.T, fieldType reflect.Type, tagValue string, envValue *string) (reflect.Value, error) {
+	t.Helper()
+
+	key := strings.TrimSpace(strings.Split(tagValue, ";")[0])
+	if envValue == nil {
+		unsetEnv(t, key)
+	} else {
+		t.Setenv(key, *envValue)
 	}
 
-	unsetEnv(t, "SIMPLEENV_TEST_OPTIONAL_INT")
+	cfgType := reflect.StructOf([]reflect.StructField{{
+		Name: "Value",
+		Type: fieldType,
+		Tag:  reflect.StructTag(`env:"` + tagValue + `"`),
+	}})
 
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	loaded := reflect.New(cfgType)
+	err := Load(loaded.Interface())
+	return loaded.Elem().Field(0), err
+}
+
+func TestLoadInputValidation(t *testing.T) {
+	x := 10
+	tests := []struct {
+		name     string
+		input    any
+		contains string
+	}{
+		{name: "nil input", input: nil, contains: "invalid Load input"},
+		{name: "struct by value", input: struct{}{}, contains: "pass &cfg"},
+		{name: "nil pointer", input: (*int)(nil), contains: "invalid Load input"},
+		{name: "pointer to non-struct", input: &x, contains: "invalid Load input"},
 	}
 
-	if c.Concurrency != 0 {
-		t.Fatalf("expected zero value for optional missing int, got %d", c.Concurrency)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Load(tt.input)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("expected error to contain %q, got %q", tt.contains, err.Error())
+			}
+		})
 	}
 }
 
-func TestLoadOptionalFloatMissingSkipsParsing(t *testing.T) {
-	type cfg struct {
-		Version float64 `env:"SIMPLEENV_TEST_OPTIONAL_FLOAT;optional"`
+func TestLoadBehaviorCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		fieldType   reflect.Type
+		tag         string
+		envValue    *string
+		wantErr     bool
+		errContains []string
+		wantValue   any
+	}{
+		{
+			name:      "optional int missing keeps zero",
+			fieldType: reflect.TypeOf(int(0)),
+			tag:       "SIMPLEENV_TEST_OPTIONAL_INT;optional",
+			envValue:  nil,
+			wantValue: int(0),
+		},
+		{
+			name:      "optional float missing keeps zero",
+			fieldType: reflect.TypeOf(float64(0)),
+			tag:       "SIMPLEENV_TEST_OPTIONAL_FLOAT;optional",
+			envValue:  nil,
+			wantValue: float64(0),
+		},
+		{
+			name:      "optional with min missing skips validation",
+			fieldType: reflect.TypeOf(int(0)),
+			tag:       "SIMPLEENV_TEST_OPTIONAL_MIN;optional;min=1",
+			envValue:  nil,
+			wantValue: int(0),
+		},
+		{
+			name:        "required missing returns error",
+			fieldType:   reflect.TypeOf(int(0)),
+			tag:         "SIMPLEENV_TEST_REQUIRED_MISSING;min=1",
+			envValue:    nil,
+			wantErr:     true,
+			errContains: []string{"<unset>"},
+		},
+		{
+			name:        "optional present invalid int returns error",
+			fieldType:   reflect.TypeOf(int(0)),
+			tag:         "SIMPLEENV_TEST_OPTIONAL_INVALID;optional",
+			envValue:    strPtr("abc"),
+			wantErr:     true,
+			errContains: []string{"valid int"},
+		},
+		{
+			name:      "whitespace in tag options is tolerated",
+			fieldType: reflect.TypeOf(""),
+			tag:       " SIMPLEENV_TEST_TAG_SPACES ; optional ; oneof=foo,bar ",
+			envValue:  strPtr("foo"),
+			wantValue: "foo",
+		},
+		{
+			name:        "unknown constraint returns error",
+			fieldType:   reflect.TypeOf(""),
+			tag:         "SIMPLEENV_TEST_UNKNOWN_CONSTRAINT;nope=value",
+			envValue:    strPtr("john"),
+			wantErr:     true,
+			errContains: []string{"unsupported constraint"},
+		},
+		{
+			name:      "regex supports quoted pattern",
+			fieldType: reflect.TypeOf(""),
+			tag:       "SIMPLEENV_TEST_REGEX_QUOTED;regex='(http|https)://(localhost|127.0.0.1):[0-9]+'",
+			envValue:  strPtr("http://localhost:8085"),
+			wantValue: "http://localhost:8085",
+		},
+		{
+			name:        "unknown format returns error",
+			fieldType:   reflect.TypeOf(""),
+			tag:         "SIMPLEENV_TEST_UNKNOWN_FORMAT;format=TOKEN;oneof=abc,def",
+			envValue:    strPtr("abc"),
+			wantErr:     true,
+			errContains: []string{"unsupported format"},
+		},
+		{
+			name:        "error message includes field env and expected",
+			fieldType:   reflect.TypeOf(int(0)),
+			tag:         "SIMPLEENV_TEST_ERROR_SHAPE;min=1",
+			envValue:    strPtr("abc"),
+			wantErr:     true,
+			errContains: []string{`field "Value"`, `ENV["SIMPLEENV_TEST_ERROR_SHAPE"]`, "expected"},
+		},
 	}
 
-	unsetEnv(t, "SIMPLEENV_TEST_OPTIONAL_FLOAT")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, err := loadSingleField(t, tt.fieldType, tt.tag, tt.envValue)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				for _, contains := range tt.errContains {
+					if !strings.Contains(err.Error(), contains) {
+						t.Fatalf("expected error to contain %q, got %q", contains, err.Error())
+					}
+				}
+				return
+			}
 
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if c.Version != 0 {
-		t.Fatalf("expected zero value for optional missing float, got %f", c.Version)
-	}
-}
-
-func TestLoadOptionalWithMinMissingSkipsValidation(t *testing.T) {
-	type cfg struct {
-		Concurrency int `env:"SIMPLEENV_TEST_OPTIONAL_MIN;optional;min=1"`
-	}
-
-	unsetEnv(t, "SIMPLEENV_TEST_OPTIONAL_MIN")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-}
-
-func TestLoadRequiredMissingReturnsError(t *testing.T) {
-	type cfg struct {
-		Concurrency int `env:"SIMPLEENV_TEST_REQUIRED_MISSING;min=1"`
-	}
-
-	unsetEnv(t, "SIMPLEENV_TEST_REQUIRED_MISSING")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected error for missing required env var, got nil")
-	}
-}
-
-func TestLoadOptionalPresentInvalidValueReturnsError(t *testing.T) {
-	type cfg struct {
-		Concurrency int `env:"SIMPLEENV_TEST_OPTIONAL_INVALID;optional"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_OPTIONAL_INVALID", "abc")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected parsing error for present invalid optional int value, got nil")
-	}
-}
-
-func TestLoadStructValueReturnsError(t *testing.T) {
-	type cfg struct {
-		Concurrency int `env:"SIMPLEENV_TEST_STRUCT_VALUE;optional"`
-	}
-
-	var c cfg
-	err := Load(c)
-	if err == nil {
-		t.Fatal("expected error when passing struct by value, got nil")
-	}
-}
-
-func TestLoadNilInputReturnsError(t *testing.T) {
-	err := Load(nil)
-	if err == nil {
-		t.Fatal("expected error when passing nil, got nil")
-	}
-}
-
-func TestLoadUnknownFormatConstraintReturnsError(t *testing.T) {
-	type cfg struct {
-		Token string `env:"SIMPLEENV_TEST_UNKNOWN_FORMAT;format=TOKEN;oneof=abc,def"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_UNKNOWN_FORMAT", "abc")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected error for unknown format constraint, got nil")
-	}
-}
-
-func TestLoadWithWhitespaceInTagOptions(t *testing.T) {
-	type cfg struct {
-		Name string `env:" SIMPLEENV_TEST_TAG_SPACES ; optional ; oneof=foo,bar "`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_TAG_SPACES", "foo")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected no error with whitespace-trimmed tag options, got %v", err)
-	}
-
-	if c.Name != "foo" {
-		t.Fatalf("expected parsed value 'foo', got %q", c.Name)
-	}
-}
-
-func TestLoadSkipsFieldsWithoutEnvTag(t *testing.T) {
-	type cfg struct {
-		Name         string `env:"SIMPLEENV_TEST_WITH_TAG"`
-		DefaultValue string
-	}
-
-	t.Setenv("SIMPLEENV_TEST_WITH_TAG", "from-env")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected no error when untagged field exists, got %v", err)
-	}
-
-	if c.Name != "from-env" {
-		t.Fatalf("expected Name from env, got %q", c.Name)
-	}
-
-	if c.DefaultValue != "" {
-		t.Fatalf("expected untagged field to keep zero value, got %q", c.DefaultValue)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if !reflect.DeepEqual(value.Interface(), tt.wantValue) {
+				t.Fatalf("unexpected value: got %#v, want %#v", value.Interface(), tt.wantValue)
+			}
+		})
 	}
 }
 
-func TestLoadEmptyEnvTagValueReturnsError(t *testing.T) {
-	type cfg struct {
-		APITestNoEnvNameInTag string `env:""`
+func TestLoadTagRules(t *testing.T) {
+	t.Run("field without env tag is skipped", func(t *testing.T) {
+		type cfg struct {
+			Name         string `env:"SIMPLEENV_TEST_WITH_TAG"`
+			DefaultValue string
+		}
+
+		t.Setenv("SIMPLEENV_TEST_WITH_TAG", "from-env")
+
+		var c cfg
+		err := Load(&c)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if c.Name != "from-env" {
+			t.Fatalf("expected Name from env, got %q", c.Name)
+		}
+		if c.DefaultValue != "" {
+			t.Fatalf("expected untagged field zero value, got %q", c.DefaultValue)
+		}
+	})
+
+	t.Run("empty env tag value returns error", func(t *testing.T) {
+		type cfg struct {
+			NoKey string `env:""`
+		}
+
+		var c cfg
+		err := Load(&c)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("malformed tag returns error", func(t *testing.T) {
+		field := reflect.StructField{
+			Name: "NoKey",
+			Tag:  reflect.StructTag(`env:`),
+		}
+
+		_, err := parseEnvTag(field)
+		if err == nil {
+			t.Fatal("expected error for malformed env tag, got nil")
+		}
+	})
+}
+
+func TestLoadFormatCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		envKey    string
+		format    string
+		value     string
+		wantError bool
+		setup     func(t *testing.T) string
+	}{
+		{name: "URI valid", envKey: "SIMPLEENV_TEST_FORMAT_URI", format: "URI", value: "postgres://localhost:5432/mydb"},
+		{
+			name:   "FILE valid",
+			envKey: "SIMPLEENV_TEST_FORMAT_FILE",
+			format: "FILE",
+			setup: func(t *testing.T) string {
+				tmpFile, err := os.CreateTemp(t.TempDir(), "simpleenv-file-*.txt")
+				if err != nil {
+					t.Fatalf("failed to create temp file: %v", err)
+				}
+				_ = tmpFile.Close()
+				return tmpFile.Name()
+			},
+		},
+		{
+			name:   "DIR valid",
+			envKey: "SIMPLEENV_TEST_FORMAT_DIR",
+			format: "DIR",
+			setup: func(t *testing.T) string {
+				return t.TempDir()
+			},
+		},
+		{name: "HOSTPORT valid", envKey: "SIMPLEENV_TEST_FORMAT_HOSTPORT", format: "HOSTPORT", value: "127.0.0.1:8080"},
+		{name: "UUID valid", envKey: "SIMPLEENV_TEST_FORMAT_UUID", format: "UUID", value: "550e8400-e29b-41d4-a716-446655440000"},
+		{name: "IP valid", envKey: "SIMPLEENV_TEST_FORMAT_IP", format: "IP", value: "2001:db8::1"},
+		{name: "HEX valid", envKey: "SIMPLEENV_TEST_FORMAT_HEX", format: "HEX", value: "a1B2c3D4"},
+		{name: "ALPHANUMERIC valid", envKey: "SIMPLEENV_TEST_FORMAT_ALNUM", format: "ALPHANUMERIC", value: "abc123XYZ"},
+		{name: "IDENTIFIER valid", envKey: "SIMPLEENV_TEST_FORMAT_IDENTIFIER", format: "IDENTIFIER", value: "my-app_name_01"},
+		{name: "IDENTIFIER invalid", envKey: "SIMPLEENV_TEST_FORMAT_IDENTIFIER_BAD", format: "IDENTIFIER", value: "not valid", wantError: true},
+		{name: "multiple formats unsupported", envKey: "SIMPLEENV_TEST_FORMAT_MULTI", format: "URL|FILE", value: "http://localhost:8080", wantError: true},
 	}
 
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected error for empty env tag value, got nil")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value := tt.value
+			if tt.setup != nil {
+				value = tt.setup(t)
+			}
+
+			tag := tt.envKey + ";format=" + tt.format
+			_, err := loadSingleField(t, reflect.TypeOf(""), tag, strPtr(value))
+			if tt.wantError && err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !tt.wantError && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
 	}
 }
 
-func TestLoadMalformedEnvTagReturnsError(t *testing.T) {
-	field := reflect.StructField{
-		Name: "APITestNoEnvNameInTag",
-		Tag:  reflect.StructTag(`env:`),
+func TestLoadTypeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		fieldType   reflect.Type
+		envKey      string
+		envValue    string
+		wantValue   any
+		wantPointer bool
+	}{
+		{name: "bool", fieldType: reflect.TypeOf(true), envKey: "SIMPLEENV_TEST_BOOL", envValue: "true", wantValue: true},
+		{name: "int64", fieldType: reflect.TypeOf(int64(0)), envKey: "SIMPLEENV_TEST_INT64", envValue: "922337203685477580", wantValue: int64(922337203685477580)},
+		{name: "uint", fieldType: reflect.TypeOf(uint(0)), envKey: "SIMPLEENV_TEST_UINT", envValue: "12", wantValue: uint(12)},
+		{name: "duration", fieldType: reflect.TypeOf(time.Duration(0)), envKey: "SIMPLEENV_TEST_DURATION", envValue: "2m30s", wantValue: 150 * time.Second},
+		{name: "text unmarshaler value", fieldType: reflect.TypeOf(customToken("")), envKey: "SIMPLEENV_TEST_TEXT_UNMARSHALER", envValue: "abc123", wantValue: customToken("token:abc123")},
+		{name: "text unmarshaler pointer", fieldType: reflect.TypeOf((*customToken)(nil)), envKey: "SIMPLEENV_TEST_TEXT_UNMARSHALER_PTR", envValue: "xyz789", wantValue: customToken("token:xyz789"), wantPointer: true},
 	}
 
-	_, err := parseEnvTag(field)
-	if err == nil {
-		t.Fatal("expected error for malformed env tag, got nil")
-	}
-}
-
-func TestLoadUnknownConstraintReturnsError(t *testing.T) {
-	type cfg struct {
-		Name string `env:"SIMPLEENV_TEST_UNKNOWN_CONSTRAINT;nope=value"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_UNKNOWN_CONSTRAINT", "john")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected error for unknown constraint, got nil")
-	}
-}
-
-func TestLoadRegexConstraintSupportsQuotedPattern(t *testing.T) {
-	type cfg struct {
-		PubsubHostURL string `env:"SIMPLEENV_TEST_REGEX_QUOTED;regex='(http|https)://(localhost|127.0.0.1):[0-9]+'"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_REGEX_QUOTED", "http://localhost:8085")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected no error for quoted regex pattern, got %v", err)
-	}
-}
-
-func TestLoadErrorMessageIncludesFieldEnvAndExpected(t *testing.T) {
-	type cfg struct {
-		Concurrency int `env:"SIMPLEENV_TEST_ERROR_SHAPE;min=1"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_ERROR_SHAPE", "abc")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected validation/parsing error, got nil")
-	}
-
-	errStr := err.Error()
-	if !strings.Contains(errStr, "field \"Concurrency\"") {
-		t.Fatalf("expected error to include field name, got %q", errStr)
-	}
-	if !strings.Contains(errStr, "ENV[\"SIMPLEENV_TEST_ERROR_SHAPE\"]") {
-		t.Fatalf("expected error to include env key, got %q", errStr)
-	}
-	if !strings.Contains(errStr, "expected") {
-		t.Fatalf("expected error to include expected constraint, got %q", errStr)
-	}
-}
-
-func TestLoadFormatURIValid(t *testing.T) {
-	type cfg struct {
-		DatabaseURI string `env:"SIMPLEENV_TEST_FORMAT_URI;format=URI"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_URI", "postgres://localhost:5432/mydb")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid URI format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatFILEValid(t *testing.T) {
-	type cfg struct {
-		ConfigPath string `env:"SIMPLEENV_TEST_FORMAT_FILE;format=FILE"`
-	}
-
-	tmpFile, err := os.CreateTemp(t.TempDir(), "simpleenv-file-*.txt")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	_ = tmpFile.Close()
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_FILE", tmpFile.Name())
-
-	var c cfg
-	err = Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid FILE format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatDIRValid(t *testing.T) {
-	type cfg struct {
-		WorkDir string `env:"SIMPLEENV_TEST_FORMAT_DIR;format=DIR"`
-	}
-
-	path := t.TempDir()
-	t.Setenv("SIMPLEENV_TEST_FORMAT_DIR", path)
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid DIR format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatHOSTPORTValid(t *testing.T) {
-	type cfg struct {
-		BindAddress string `env:"SIMPLEENV_TEST_FORMAT_HOSTPORT;format=HOSTPORT"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_HOSTPORT", "127.0.0.1:8080")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid HOSTPORT format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatMultipleValuesNotSupported(t *testing.T) {
-	type cfg struct {
-		Path string `env:"SIMPLEENV_TEST_FORMAT_MULTI;format=URL|FILE"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_MULTI", "http://localhost:8080")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected error for multiple format values, got nil")
-	}
-}
-
-func TestLoadFormatUUIDValid(t *testing.T) {
-	type cfg struct {
-		RequestID string `env:"SIMPLEENV_TEST_FORMAT_UUID;format=UUID"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_UUID", "550e8400-e29b-41d4-a716-446655440000")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid UUID format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatIPValid(t *testing.T) {
-	type cfg struct {
-		Address string `env:"SIMPLEENV_TEST_FORMAT_IP;format=IP"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_IP", "2001:db8::1")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid IP format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatHEXValid(t *testing.T) {
-	type cfg struct {
-		Token string `env:"SIMPLEENV_TEST_FORMAT_HEX;format=HEX"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_HEX", "a1B2c3D4")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid HEX format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatALPHANUMERICValid(t *testing.T) {
-	type cfg struct {
-		Code string `env:"SIMPLEENV_TEST_FORMAT_ALNUM;format=ALPHANUMERIC"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_ALNUM", "abc123XYZ")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid ALPHANUMERIC format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatIDENTIFIERValid(t *testing.T) {
-	type cfg struct {
-		Name string `env:"SIMPLEENV_TEST_FORMAT_IDENTIFIER;format=IDENTIFIER"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_IDENTIFIER", "my-app_name_01")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected valid IDENTIFIER format to pass, got %v", err)
-	}
-}
-
-func TestLoadFormatIDENTIFIERInvalid(t *testing.T) {
-	type cfg struct {
-		Name string `env:"SIMPLEENV_TEST_FORMAT_IDENTIFIER_BAD;format=IDENTIFIER"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_FORMAT_IDENTIFIER_BAD", "not valid")
-
-	var c cfg
-	err := Load(&c)
-	if err == nil {
-		t.Fatal("expected invalid IDENTIFIER format to fail, got nil")
-	}
-}
-
-func TestLoadBoolTypeValid(t *testing.T) {
-	type cfg struct {
-		FeatureEnabled bool `env:"SIMPLEENV_TEST_BOOL"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_BOOL", "true")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected bool parsing to pass, got %v", err)
-	}
-
-	if !c.FeatureEnabled {
-		t.Fatal("expected bool field to be true")
-	}
-}
-
-func TestLoadInt64TypeValid(t *testing.T) {
-	type cfg struct {
-		MaxBytes int64 `env:"SIMPLEENV_TEST_INT64"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_INT64", "922337203685477580")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected int64 parsing to pass, got %v", err)
-	}
-
-	if c.MaxBytes != 922337203685477580 {
-		t.Fatalf("expected parsed int64 value, got %d", c.MaxBytes)
-	}
-}
-
-func TestLoadUintTypeValid(t *testing.T) {
-	type cfg struct {
-		WorkerCount uint `env:"SIMPLEENV_TEST_UINT"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_UINT", "12")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected uint parsing to pass, got %v", err)
-	}
-
-	if c.WorkerCount != 12 {
-		t.Fatalf("expected parsed uint value 12, got %d", c.WorkerCount)
-	}
-}
-
-func TestLoadDurationTypeValid(t *testing.T) {
-	type cfg struct {
-		Timeout time.Duration `env:"SIMPLEENV_TEST_DURATION"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_DURATION", "2m30s")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected duration parsing to pass, got %v", err)
-	}
-
-	if c.Timeout != 150*time.Second {
-		t.Fatalf("expected parsed duration 150s, got %v", c.Timeout)
-	}
-}
-
-func TestLoadTextUnmarshalerTypeValid(t *testing.T) {
-	type cfg struct {
-		Token customToken `env:"SIMPLEENV_TEST_TEXT_UNMARSHALER"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_TEXT_UNMARSHALER", "abc123")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected text unmarshaler parsing to pass, got %v", err)
-	}
-
-	if c.Token != "token:abc123" {
-		t.Fatalf("expected custom token value, got %q", c.Token)
-	}
-}
-
-func TestLoadTextUnmarshalerPointerTypeValid(t *testing.T) {
-	type cfg struct {
-		Token *customToken `env:"SIMPLEENV_TEST_TEXT_UNMARSHALER_PTR"`
-	}
-
-	t.Setenv("SIMPLEENV_TEST_TEXT_UNMARSHALER_PTR", "xyz789")
-
-	var c cfg
-	err := Load(&c)
-	if err != nil {
-		t.Fatalf("expected pointer text unmarshaler parsing to pass, got %v", err)
-	}
-
-	if c.Token == nil {
-		t.Fatal("expected pointer token to be initialized")
-	}
-
-	if *c.Token != "token:xyz789" {
-		t.Fatalf("expected pointer custom token value, got %q", *c.Token)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value, err := loadSingleField(t, tt.fieldType, tt.envKey, strPtr(tt.envValue))
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			if tt.wantPointer {
+				if value.IsNil() {
+					t.Fatal("expected pointer value, got nil")
+				}
+				if !reflect.DeepEqual(value.Elem().Interface(), tt.wantValue) {
+					t.Fatalf("unexpected pointer value: got %#v, want %#v", value.Elem().Interface(), tt.wantValue)
+				}
+				return
+			}
+
+			if !reflect.DeepEqual(value.Interface(), tt.wantValue) {
+				t.Fatalf("unexpected value: got %#v, want %#v", value.Interface(), tt.wantValue)
+			}
+		})
 	}
 }

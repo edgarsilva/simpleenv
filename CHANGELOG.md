@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.1.1] - 2026-02-25
+
+### Added
+- Added `allowempty` tag support for `string` and `encoding.TextUnmarshaler` fields.
+
+### Changed
+- Tagged env vars now fail when present with an empty value by default (`KEY=`).
+- Clarified README behavior notes around missing vs empty env vars.
+- Added table-driven tests for `allowempty` behavior and invalid `allowempty` type usage.
+
 ## [v1.1.0] - 2026-02-25
 
 ### Added

@@ -61,6 +61,7 @@ Tag format is:
 `env:"ENV_KEY;constraint1;constraint2"`
 
 Examples:
+
 - `env:"PORT;min=1;max=65535"`
 - `env:"MODE;oneof=dev,test,prod"`
 - `env:"PUBSUB_URL;regex='(http|https)://(localhost|127.0.0.1):[0-9]+'"`
@@ -78,7 +79,9 @@ Examples:
 
 ## Supported Constraints
 
-- `optional`: env var may be unset
+- `optional`: allows env var to be missing.
+- Missing optional env vars keep whatever value was already in the struct (or zero value if it started empty).
+- `allowempty`: only for `string` or `encoding.TextUnmarshaler` fields; allows `MY_ENV_VAR=` when the key exists.
 - `oneof=a,b,c`: value must match one option
 - `min=n`: numeric value must be `>= n`
 - `max=n`: numeric value must be `<= n`
@@ -104,8 +107,10 @@ Note: only one format value is allowed (`format=URL` is valid, `format=URL|FILE`
 
 - `Load` requires a pointer to a struct: `simpleenv.Load(&cfg)`.
 - Fields without an `env` tag are skipped.
-- `optional` only applies when the env var is truly unset.
-  - If env var is set to an empty string, it is treated as a provided value.
+- `optional` applies only when the env var is missing, not when it is empty (`MY_ENV_VAR=`).
+- By default, if a tagged env var is present but empty (`MY_ENV_VAR=`), `Load` returns an error.
+- Use `allowempty` only for `string` or `encoding.TextUnmarshaler` fields when empty values are intentional.
+- `allowempty` is invalid for numeric, boolean, and duration fields; use `optional` when the env var may be missing.
 - Unknown constraints return an error.
 - Unknown `format=` values return an error.
 

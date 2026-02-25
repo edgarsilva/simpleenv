@@ -18,10 +18,11 @@ import (
 )
 
 type envTag struct {
-	key      string
-	options  []string
-	optional bool
-	hasTag   bool
+	key        string
+	options    []string
+	optional   bool
+	allowEmpty bool
+	hasTag     bool
 }
 
 var (
@@ -45,7 +46,8 @@ func loadInputError(expected string) error {
 //	that it is one of the values in the `oneof` constraint.
 //
 //	valid constraints:
-//	- optional: the environment variable does not need to exist and be set
+//	- optional: the environment variable may be missing
+//	- allowempty: only for string or text unmarshaler fields; allows KEY="" when present
 //	- oneof: the environment variable must be one of the values in the `oneof` constraint list (separeted by commas)
 //	- min: the environment variable must be greater than or equal to the value in the `min` constraint
 //	- regex: the environment variable must match the regex pattern in the `regex` constraint
@@ -122,6 +124,10 @@ func Load(envConfig any) error {
 			return fieldConstraintError(fieldType.Name, fieldTag.key, "<unset>", "a value to set or to be marked as optional")
 		}
 
+		if envValue == "" && !fieldTag.allowEmpty {
+			return fieldConstraintError(fieldType.Name, fieldTag.key, envValue, "a non-empty value")
+		}
+
 		err = validateConstraints(fieldType, fieldTag.options, envValue)
 		if err != nil {
 			return err
@@ -167,12 +173,17 @@ func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
 
 	envKey := strings.TrimSpace(tagOptions[0])
 	optional := slices.Contains(tagOptions, "optional")
+	allowEmpty := slices.Contains(tagOptions, "allowempty")
+	if allowEmpty && !supportsAllowEmpty(fieldType.Type) {
+		return envTag{}, fmt.Errorf("invalid tag for field %q (ENV[%q]): allowempty is only supported for string or encoding.TextUnmarshaler types", fieldType.Name, envKey)
+	}
 
 	return envTag{
-		key:      envKey,
-		options:  tagOptions,
-		optional: optional,
-		hasTag:   true,
+		key:        envKey,
+		options:    tagOptions,
+		optional:   optional,
+		allowEmpty: allowEmpty,
+		hasTag:     true,
 	}, nil
 }
 
@@ -180,7 +191,7 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 	envKey := tagOptions[0]
 
 	for _, constraint := range tagOptions[1:] {
-		if constraint == "" || constraint == "optional" {
+		if constraint == "" || constraint == "optional" || constraint == "allowempty" {
 			continue
 		}
 
@@ -324,6 +335,18 @@ func parseWithTextUnmarshaler(fieldType reflect.StructField, envKey, envValue st
 	}
 
 	return valuePtr.Elem(), true, nil
+}
+
+func supportsAllowEmpty(fieldType reflect.Type) bool {
+	if fieldType.Kind() == reflect.String {
+		return true
+	}
+
+	if fieldType.Kind() == reflect.Pointer {
+		return fieldType.Implements(textUnmarshalerType)
+	}
+
+	return reflect.PointerTo(fieldType).Implements(textUnmarshalerType)
 }
 
 func castToValuePtr(fieldType reflect.StructField) reflect.Value {

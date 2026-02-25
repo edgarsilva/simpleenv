@@ -133,6 +133,36 @@ func TestLoadBehaviorCases(t *testing.T) {
 			errContains: []string{"valid int"},
 		},
 		{
+			name:        "optional present empty string returns error",
+			fieldType:   reflect.TypeOf(""),
+			tag:         "SIMPLEENV_TEST_OPTIONAL_EMPTY;optional",
+			envValue:    strPtr(""),
+			wantErr:     true,
+			errContains: []string{"non-empty value"},
+		},
+		{
+			name:        "required present empty string returns error",
+			fieldType:   reflect.TypeOf(""),
+			tag:         "SIMPLEENV_TEST_REQUIRED_EMPTY",
+			envValue:    strPtr(""),
+			wantErr:     true,
+			errContains: []string{"non-empty value"},
+		},
+		{
+			name:      "optional present empty string with allowempty succeeds",
+			fieldType: reflect.TypeOf(""),
+			tag:       "SIMPLEENV_TEST_OPTIONAL_EMPTY_ALLOWED;optional;allowempty",
+			envValue:  strPtr(""),
+			wantValue: "",
+		},
+		{
+			name:      "required present empty string with allowempty succeeds",
+			fieldType: reflect.TypeOf(""),
+			tag:       "SIMPLEENV_TEST_REQUIRED_EMPTY_ALLOWED;allowempty",
+			envValue:  strPtr(""),
+			wantValue: "",
+		},
+		{
 			name:      "whitespace in tag options is tolerated",
 			fieldType: reflect.TypeOf(""),
 			tag:       " SIMPLEENV_TEST_TAG_SPACES ; optional ; oneof=foo,bar ",
@@ -161,6 +191,14 @@ func TestLoadBehaviorCases(t *testing.T) {
 			envValue:    strPtr("abc"),
 			wantErr:     true,
 			errContains: []string{"unsupported format"},
+		},
+		{
+			name:        "allowempty on int is invalid",
+			fieldType:   reflect.TypeOf(int(0)),
+			tag:         "SIMPLEENV_TEST_ALLOWEMPTY_INT;allowempty",
+			envValue:    strPtr(""),
+			wantErr:     true,
+			errContains: []string{"allowempty is only supported"},
 		},
 		{
 			name:        "error message includes field env and expected",
@@ -309,6 +347,7 @@ func TestLoadTypeCases(t *testing.T) {
 		name        string
 		fieldType   reflect.Type
 		envKey      string
+		tag         string
 		envValue    string
 		wantValue   any
 		wantPointer bool
@@ -319,11 +358,17 @@ func TestLoadTypeCases(t *testing.T) {
 		{name: "duration", fieldType: reflect.TypeOf(time.Duration(0)), envKey: "SIMPLEENV_TEST_DURATION", envValue: "2m30s", wantValue: 150 * time.Second},
 		{name: "text unmarshaler value", fieldType: reflect.TypeOf(customToken("")), envKey: "SIMPLEENV_TEST_TEXT_UNMARSHALER", envValue: "abc123", wantValue: customToken("token:abc123")},
 		{name: "text unmarshaler pointer", fieldType: reflect.TypeOf((*customToken)(nil)), envKey: "SIMPLEENV_TEST_TEXT_UNMARSHALER_PTR", envValue: "xyz789", wantValue: customToken("token:xyz789"), wantPointer: true},
+		{name: "text unmarshaler allowempty", fieldType: reflect.TypeOf(customToken("")), envKey: "SIMPLEENV_TEST_TEXT_UNMARSHALER_EMPTY", tag: "SIMPLEENV_TEST_TEXT_UNMARSHALER_EMPTY;allowempty", envValue: "", wantValue: customToken("")},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			value, err := loadSingleField(t, tt.fieldType, tt.envKey, strPtr(tt.envValue))
+			tagValue := tt.envKey
+			if tt.tag != "" {
+				tagValue = tt.tag
+			}
+
+			value, err := loadSingleField(t, tt.fieldType, tagValue, strPtr(tt.envValue))
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}

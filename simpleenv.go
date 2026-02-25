@@ -82,20 +82,20 @@ func loadInputError(expected string) error {
 func Load(envConfig any) error {
 	v := reflect.ValueOf(envConfig)
 	if !v.IsValid() {
-		return loadInputError("a non-nil pointer to struct")
+		return loadInputError("a non-nil pointer to a struct")
 	}
 
 	if v.Kind() == reflect.Struct {
-		return loadInputError("a pointer to struct (pass &cfg)")
+		return loadInputError("a non-nil pointer to a struct (pass &cfg so it can be updated)")
 	}
 
 	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return loadInputError("a non-nil pointer to struct")
+		return loadInputError("a non-nil pointer to a struct")
 	}
 
 	e := v.Elem()
 	if e.Kind() != reflect.Struct {
-		return loadInputError("a pointer to struct")
+		return loadInputError("a non-nil pointer to a struct")
 	}
 
 	t := e.Type()

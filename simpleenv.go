@@ -33,6 +33,10 @@ func fieldConstraintError(fieldName, envKey, envValue, expected string) error {
 	return fmt.Errorf("invalid value for field %q from ENV[%q]: got %q, expected %s", fieldName, envKey, envValue, expected)
 }
 
+func loadInputError(expected string) error {
+	return fmt.Errorf("invalid Load input: expected %s", expected)
+}
+
 // Load loads environment variables into the given struct
 // and validates the constraints specified in the struct tags
 //
@@ -78,20 +82,20 @@ func fieldConstraintError(fieldName, envKey, envValue, expected string) error {
 func Load(envConfig any) error {
 	v := reflect.ValueOf(envConfig)
 	if !v.IsValid() {
-		return errors.New("failed to load env config, got nil value")
+		return loadInputError("a non-nil pointer to struct")
 	}
 
 	if v.Kind() == reflect.Struct {
-		return errors.New("failed to load env config, expected pointer to struct (pass &cfg)")
+		return loadInputError("a pointer to struct (pass &cfg)")
 	}
 
 	if v.Kind() != reflect.Pointer || v.IsNil() {
-		return errors.New("failed to load env config, expected a non-nil pointer to an EnvConfig struct")
+		return loadInputError("a non-nil pointer to struct")
 	}
 
 	e := v.Elem()
 	if e.Kind() != reflect.Struct {
-		return errors.New("failed to load env config, expected a pointer to a struct")
+		return loadInputError("a pointer to struct")
 	}
 
 	t := e.Type()
@@ -129,7 +133,7 @@ func Load(envConfig any) error {
 
 		err = assignFieldValue(fieldValue, parsedValue)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to assign field %q from ENV[%q]: %w", fieldType.Name, fieldTag.key, err)
 		}
 	}
 
@@ -334,15 +338,15 @@ func castToValuePtr(fieldType reflect.StructField) reflect.Value {
 
 func assignFieldValue(field reflect.Value, val reflect.Value) error {
 	if !field.IsValid() {
-		return errors.New("failed to assign struct field value, field is not valid")
+		return errors.New("field is not valid")
 	}
 
 	if !field.CanSet() {
-		return errors.New("failed to assign struct field value, field can't be set")
+		return errors.New("field is not settable")
 	}
 
 	if field.Type() != val.Type() {
-		return errors.New("failed to assign struct field value, types don't match")
+		return fmt.Errorf("type mismatch: field type %v != parsed type %v", field.Type(), val.Type())
 	}
 
 	field.Set(val)

@@ -14,7 +14,7 @@ go get github.com/edgarsilva/simpleenv
 ## Upgrade
 
 ```bash
-go get github.com/edgarsilva/simpleenv@v1.1.0
+go get github.com/edgarsilva/simpleenv@v1.1.1
 go mod tidy
 ```
 
@@ -23,6 +23,12 @@ To verify the resolved version:
 ```bash
 go list -m github.com/edgarsilva/simpleenv
 ```
+
+### Migration Note (v1.1.1)
+
+- Tagged env vars now fail when present with an empty value (`KEY=`) by default.
+- If empty values are intentional, add `allowempty` to `string` or `encoding.TextUnmarshaler` fields.
+- `allowempty` is invalid for numeric, boolean, and duration fields.
 
 ## Quick Start
 

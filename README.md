@@ -14,7 +14,7 @@ go get github.com/edgarsilva/simpleenv
 ## Upgrade
 
 ```bash
-go get github.com/edgarsilva/simpleenv@v1.1.1
+go get github.com/edgarsilva/simpleenv@v1.2.0
 go mod tidy
 ```
 
@@ -23,6 +23,12 @@ To verify the resolved version:
 ```bash
 go list -m github.com/edgarsilva/simpleenv
 ```
+
+### Migration Note (v1.2.0)
+
+- Added `trimspace` for `string` and `encoding.TextUnmarshaler` fields to explicitly trim leading/trailing whitespace before validation and parsing.
+- `trimspace` is invalid for numeric, boolean, and duration fields.
+- Numeric and duration parsing/constraints remain strict; whitespace in values is not trimmed automatically.
 
 ### Migration Note (v1.1.1)
 
@@ -88,6 +94,7 @@ Examples:
 - `optional`: allows env var to be missing.
 - Missing optional env vars keep whatever value was already in the struct (or zero value if it started empty).
 - `allowempty`: only for `string` or `encoding.TextUnmarshaler` fields; allows `MY_ENV_VAR=` when the key exists.
+- `trimspace`: only for `string` or `encoding.TextUnmarshaler` fields; trims leading/trailing whitespace before validation/parsing.
 - `oneof=a,b,c`: value must match one option
 - `min=n`: numeric value must be `>= n` (for `time.Duration`, use duration values like `500ms`, `2s`, `1m`)
 - `max=n`: numeric value must be `<= n` (for `time.Duration`, use duration values like `500ms`, `2s`, `1m`)
@@ -115,8 +122,10 @@ Note: only one format value is allowed (`format=URL` is valid, `format=URL|FILE`
 - Fields without an `env` tag are skipped.
 - `optional` applies only when the env var is missing, not when it is empty (`MY_ENV_VAR=`).
 - By default, if a tagged env var is present but empty (`MY_ENV_VAR=`), `Load` returns an error.
+- `trimspace` is explicit (not automatic), and only applies when the tag is present.
+- `trimspace` runs before `allowempty`, `oneof`, `regex`, and `format` checks.
 - Use `allowempty` only for `string` or `encoding.TextUnmarshaler` fields when empty values are intentional.
-- `allowempty` is invalid for numeric, boolean, and duration fields; use `optional` when the env var may be missing.
+- `allowempty` and `trimspace` are invalid for numeric, boolean, and duration fields; use `optional` when the env var may be missing.
 - Unknown constraints return an error.
 - Unknown `format=` values return an error.
 

@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.2.0] - 2026-03-02
+
+### Added
+- Added `trimspace` tag support for `string` and `encoding.TextUnmarshaler` fields.
+
+### Changed
+- `trimspace` now trims leading/trailing whitespace before `allowempty`, validation constraints, and parsing.
+- Added tests that verify explicit trim behavior, whitespace-only handling, and unsupported type errors.
+- Clarified README docs for explicit whitespace handling and strict numeric/duration parsing.
+
 ## [v1.1.2] - 2026-02-25
 
 ### Added

@@ -22,6 +22,7 @@ type envTag struct {
 	options    []string
 	optional   bool
 	allowEmpty bool
+	trimSpace  bool
 	hasTag     bool
 }
 
@@ -48,6 +49,7 @@ func loadInputError(expected string) error {
 //	valid constraints:
 //	- optional: the environment variable may be missing
 //	- allowempty: only for string or text unmarshaler fields; allows KEY="" when present
+//	- trimspace: only for string or text unmarshaler fields; trims leading/trailing whitespace before validation/parsing
 //	- oneof: the environment variable must be one of the values in the `oneof` constraint list (separeted by commas)
 //	- min: the environment variable must be greater than or equal to the value in the `min` constraint
 //	- max: the environment variable must be less than or equal to the value in the `max` constraint
@@ -125,16 +127,21 @@ func Load(envConfig any) error {
 			return fieldConstraintError(fieldType.Name, fieldTag.key, "<unset>", "a value to set or to be marked as optional")
 		}
 
-		if envValue == "" && !fieldTag.allowEmpty {
-			return fieldConstraintError(fieldType.Name, fieldTag.key, envValue, "a non-empty value")
+		normalizedValue := envValue
+		if fieldTag.trimSpace {
+			normalizedValue = strings.TrimSpace(envValue)
 		}
 
-		err = validateConstraints(fieldType, fieldTag.options, envValue)
+		if normalizedValue == "" && !fieldTag.allowEmpty {
+			return fieldConstraintError(fieldType.Name, fieldTag.key, normalizedValue, "a non-empty value")
+		}
+
+		err = validateConstraints(fieldType, fieldTag.options, normalizedValue)
 		if err != nil {
 			return err
 		}
 
-		parsedValue, err := parseValueFromEnv(fieldType, fieldTag.key, envValue)
+		parsedValue, err := parseValueFromEnv(fieldType, fieldTag.key, normalizedValue)
 		if err != nil {
 			return err
 		}
@@ -175,8 +182,13 @@ func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
 	envKey := strings.TrimSpace(tagOptions[0])
 	optional := slices.Contains(tagOptions, "optional")
 	allowEmpty := slices.Contains(tagOptions, "allowempty")
+	trimSpace := slices.Contains(tagOptions, "trimspace")
 	if allowEmpty && !supportsAllowEmpty(fieldType.Type) {
 		return envTag{}, fmt.Errorf("invalid tag for field %q (ENV[%q]): allowempty is only supported for string or encoding.TextUnmarshaler types", fieldType.Name, envKey)
+	}
+
+	if trimSpace && !supportsTrimSpace(fieldType.Type) {
+		return envTag{}, fmt.Errorf("invalid tag for field %q (ENV[%q]): trimspace is only supported for string or encoding.TextUnmarshaler types", fieldType.Name, envKey)
 	}
 
 	return envTag{
@@ -184,6 +196,7 @@ func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
 		options:    tagOptions,
 		optional:   optional,
 		allowEmpty: allowEmpty,
+		trimSpace:  trimSpace,
 		hasTag:     true,
 	}, nil
 }
@@ -192,7 +205,7 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 	envKey := tagOptions[0]
 
 	for _, constraint := range tagOptions[1:] {
-		if constraint == "" || constraint == "optional" || constraint == "allowempty" {
+		if constraint == "" || constraint == "optional" || constraint == "allowempty" || constraint == "trimspace" {
 			continue
 		}
 
@@ -386,6 +399,10 @@ func supportsAllowEmpty(fieldType reflect.Type) bool {
 	}
 
 	return reflect.PointerTo(fieldType).Implements(textUnmarshalerType)
+}
+
+func supportsTrimSpace(fieldType reflect.Type) bool {
+	return supportsAllowEmpty(fieldType)
 }
 
 func castToValuePtr(fieldType reflect.StructField) reflect.Value {

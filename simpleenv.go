@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type envTag struct {
@@ -51,6 +52,8 @@ func loadInputError(expected string) error {
 //	- allowempty: only for string or text unmarshaler fields; allows KEY="" when present
 //	- trimspace: only for string or text unmarshaler fields; trims leading/trailing whitespace before validation/parsing
 //	- oneof: the environment variable must be one of the values in the `oneof` constraint list (separeted by commas)
+//	- minlen: only for string or text unmarshaler fields; the value length must be greater than or equal to the given value
+//	- maxlen: only for string or text unmarshaler fields; the value length must be less than or equal to the given value
 //	- min: the environment variable must be greater than or equal to the value in the `min` constraint
 //	- max: the environment variable must be less than or equal to the value in the `max` constraint
 //	- regex: the environment variable must match the regex pattern in the `regex` constraint
@@ -191,6 +194,10 @@ func parseEnvTag(fieldType reflect.StructField) (envTag, error) {
 		return envTag{}, fmt.Errorf("invalid tag for field %q (ENV[%q]): trimspace is only supported for string or encoding.TextUnmarshaler types", fieldType.Name, envKey)
 	}
 
+	if hasLengthConstraint(tagOptions) && !supportsStringLength(fieldType.Type) {
+		return envTag{}, fmt.Errorf("invalid tag for field %q (ENV[%q]): minlen/maxlen are only supported for string or encoding.TextUnmarshaler types", fieldType.Name, envKey)
+	}
+
 	return envTag{
 		key:        envKey,
 		options:    tagOptions,
@@ -215,6 +222,26 @@ func validateConstraints(fieldType reflect.StructField, tagOptions []string, env
 			opts := strings.Split(strOpts, ",")
 			if !slices.Contains(opts, envValue) {
 				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("one of [%s]", strOpts))
+			}
+		case strings.HasPrefix(constraint, "minlen="):
+			minLen, err := parseLenConstraint(fieldType, envKey, constraint, "minlen=")
+			if err != nil {
+				return err
+			}
+
+			valueLen := utf8.RuneCountInString(envValue)
+			if valueLen < minLen {
+				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("a value with length >= %d", minLen))
+			}
+		case strings.HasPrefix(constraint, "maxlen="):
+			maxLen, err := parseLenConstraint(fieldType, envKey, constraint, "maxlen=")
+			if err != nil {
+				return err
+			}
+
+			valueLen := utf8.RuneCountInString(envValue)
+			if valueLen > maxLen {
+				return fieldConstraintError(fieldType.Name, envKey, envValue, fmt.Sprintf("a value with length <= %d", maxLen))
 			}
 		case strings.HasPrefix(constraint, "min="):
 			minstr := strings.TrimPrefix(constraint, "min=")
@@ -403,6 +430,30 @@ func supportsAllowEmpty(fieldType reflect.Type) bool {
 
 func supportsTrimSpace(fieldType reflect.Type) bool {
 	return supportsAllowEmpty(fieldType)
+}
+
+func supportsStringLength(fieldType reflect.Type) bool {
+	return supportsAllowEmpty(fieldType)
+}
+
+func hasLengthConstraint(tagOptions []string) bool {
+	for _, option := range tagOptions[1:] {
+		if strings.HasPrefix(option, "minlen=") || strings.HasPrefix(option, "maxlen=") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func parseLenConstraint(fieldType reflect.StructField, envKey, constraint, prefix string) (int, error) {
+	valueStr := strings.TrimPrefix(constraint, prefix)
+	value, err := strconv.Atoi(valueStr)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("invalid tag for field %q (ENV[%q]): %q must be a valid non-negative integer", fieldType.Name, envKey, constraint)
+	}
+
+	return value, nil
 }
 
 func castToValuePtr(fieldType reflect.StructField) reflect.Value {

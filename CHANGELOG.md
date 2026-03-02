@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [v1.3.0] - 2026-03-02
+
+### Added
+- Added `minlen` and `maxlen` constraints for `string` and `encoding.TextUnmarshaler` fields.
+
+### Changed
+- Added tests covering length validation success/failure, trim interactions, and invalid type usage.
+
 ## [v1.2.0] - 2026-03-02
 
 ### Added
